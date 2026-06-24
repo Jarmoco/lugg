@@ -1,8 +1,8 @@
 # lugg
 
-Portable AI — package llama.cpp and GGUF models into self-contained **AppImages**.
+Package llama.cpp and GGUF models into self-contained **AppImages**.
 
-Download a model, pack it with an engine, run it anywhere. One AppImage per model.
+Download a model, pack it with llama.cpp, run it anywhere. One AppImage per model.
 
 ## Structure
 
@@ -19,8 +19,9 @@ Download a model, pack it with an engine, run it anywhere. One AppImage per mode
 
 ## Quick Start
 
-Just run:
 ```sh
+git clone https://github.com/Jarmoco/lugg.git
+cd lugg
 ./Scripts/build.sh
 ```
 
