@@ -1,0 +1,120 @@
+#!/bin/bash
+HERE="$(dirname "$(readlink -f "$0")")"
+export LD_LIBRARY_PATH="$HERE/usr/bin:$HERE/usr/lib:$LD_LIBRARY_PATH"
+
+MODEL="$HERE/usr/share/models/model.gguf"
+MMPROJ="$HERE/usr/share/models/mmproj.gguf"
+MMPROJ_FLAG=""
+[ -f "$MMPROJ" ] && MMPROJ_FLAG="--mmproj $MMPROJ"
+
+NAME="@NAME@"
+MODEL_SIZE="@MODEL_SIZE@"
+HAS_VULKAN="@HAS_VULKAN@"
+PORT=9976
+CTX_SIZE="@CTX_SIZE@"
+BATCH_SIZE="@BATCH_SIZE@"
+SPEC_TYPE="@SPEC_TYPE@"
+N_GPU_LAYERS="@N_GPU_LAYERS@"
+MODEL_ALIAS="@MODEL_ALIAS@"
+THREADS="@THREADS@"
+
+usage() {
+  echo "Usage: $(basename "$0") [OPTIONS]"
+  echo ""
+  echo "  --cli                 Launch interactive chat (llama-cli)"
+  echo "  --port NUM            Set server port (build default: $PORT)"
+  echo "  --ctx-size NUM        Set context size (build default: $CTX_SIZE)"
+  echo "  --batch-size NUM      Set batch size (build default: $BATCH_SIZE)"
+  echo "  --spec-type TYPES     Speculative decoding type (build default: $SPEC_TYPE)"
+  echo "                        Values: none, draft-simple, draft-eagle3, draft-mtp,"
+  echo "                                ngram-simple, ngram-map-k, ngram-map-k4v,"
+  echo "                                ngram-mod, ngram-cache"
+  echo "  --n-gpu-layers NUM    GPU layers (build default: $N_GPU_LAYERS)"
+  echo "  --threads NUM         CPU threads (build default: $THREADS)"
+  echo "  --help                Show this help"
+  exit 0
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --help) usage ;;
+    --cli) CLI_MODE=1; shift ;;
+    --port) PORT="$2"; shift 2 ;;
+    --ctx-size) CTX_SIZE="$2"; shift 2 ;;
+    --batch-size) BATCH_SIZE="$2"; shift 2 ;;
+    --spec-type) SPEC_TYPE="$2"; shift 2 ;;
+    --n-gpu-layers) N_GPU_LAYERS="$2"; shift 2 ;;
+    --threads) THREADS="$2"; shift 2 ;;
+    *) break ;;
+  esac
+done
+
+banner() {
+  clear 2>/dev/null || true
+  echo ""
+  echo "  ╔══════════════════════════════════════════╗"
+  echo "  ║          Local AI - llama-server         ║"
+  echo "  ╠══════════════════════════════════════════╝"
+  printf "  ║  Model:  %-27s \n" "$NAME"
+  printf "  ║  Size:   %-27s \n" "$MODEL_SIZE"
+  printf "  ║  GPU:    %-27s \n" "$HAS_VULKAN"
+  printf "  ║  Port:   %-27s \n" "$PORT"
+  echo "  ╚═══════════════════════════════════════════"
+  echo ""
+}
+
+if [ "${CLI_MODE:-0}" = "1" ]; then
+  banner
+  echo "Starting interactive chat..."
+  exec "$HERE/usr/bin/llama-cli" \
+    -m "$MODEL" \
+    $MMPROJ_FLAG \
+    "$@"
+fi
+
+LLAMA_SERVER_OPTS=(
+  -m "$MODEL"
+  $MMPROJ_FLAG
+  --port "$PORT"
+)
+
+[ -n "$CTX_SIZE" ]   && LLAMA_SERVER_OPTS+=(--ctx-size "$CTX_SIZE")
+[ -n "$BATCH_SIZE" ] && LLAMA_SERVER_OPTS+=(--batch-size "$BATCH_SIZE")
+[ "$SPEC_TYPE" != "none" ] && LLAMA_SERVER_OPTS+=(--spec-type "$SPEC_TYPE")
+
+if [ "$HAS_VULKAN" = "yes" ] && [ -n "$N_GPU_LAYERS" ]; then
+  LLAMA_SERVER_OPTS+=(--n-gpu-layers "$N_GPU_LAYERS")
+fi
+[ -n "$MODEL_ALIAS" ] && LLAMA_SERVER_OPTS+=(--alias "$MODEL_ALIAS")
+[ -n "$THREADS" ] && LLAMA_SERVER_OPTS+=(--threads "$THREADS")
+
+if [ -t 0 ]; then
+  banner
+  echo "  Server starting... (Ctrl+C to stop)"
+  echo "  API: http://localhost:$PORT"
+  echo "  Docs: http://localhost:$PORT/docs"
+  echo ""
+  exec "$HERE/usr/bin/llama-server" "${LLAMA_SERVER_OPTS[@]}" "$@"
+fi
+
+# GUI launch — run server in a terminal window.
+# Closing the terminal window sends SIGHUP and stops the server.
+for term in x-terminal-emulator kitty gnome-terminal konsole alacritty xterm terminator xfce4-terminal lxterminal; do
+  if command -v "$term" &>/dev/null; then
+    case "$(basename "$term")" in
+      gnome-terminal) flag="--" ;;
+      *)              flag="-e"  ;;
+    esac
+    exec "$term" $flag bash -c 'exec "$@"' _ \
+      "$HERE/usr/bin/llama-server" "${LLAMA_SERVER_OPTS[@]}" "$@"
+  fi
+done
+
+# No terminal found — background with PID file
+"$HERE/usr/bin/llama-server" "${LLAMA_SERVER_OPTS[@]}" "$@" &
+PID=$!
+echo "$PID" > "/tmp/lugg-$NAME.pid"
+command -v notify-send &>/dev/null && notify-send \
+  -a "lugg" "Server running" "http://localhost:$PORT  |  PID $PID" &
+trap 'kill "$PID" 2>/dev/null; rm -f "/tmp/lugg-$NAME.pid"' EXIT
+wait "$PID"

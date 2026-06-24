@@ -1,0 +1,9 @@
+# Engine (llama binaries, installed by Scripts/install-engine.sh)
+Engine
+
+# Built AppImages
+dist/
+*.AppImage
+
+# Model gguf files (downloaded via build.sh --download)
+models/
