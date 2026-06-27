@@ -18,9 +18,9 @@ download_gguf() {
   local -a NAMES=() SIZES=()
   while IFS=$'\t' read -r name size; do
     NAMES+=("$name"); SIZES+=("$size")
-  done < <(echo "$DATA" | jq -r '.[] | select(.path | endswith(".gguf")) | [.path, .size] | @tsv')
+  done < <(echo "$DATA" | jq -r '.[] | select((.path | endswith(".gguf")) or (.path | endswith(".bin"))) | [.path, .size] | @tsv')
 
-  [ ${#NAMES[@]} -eq 0 ] && echo "No .gguf files found in that repo." && return 1
+  [ ${#NAMES[@]} -eq 0 ] && echo "No .gguf or .bin files found in that repo." && return 1
 
   echo
   echo "Select a GGUF file to download:"

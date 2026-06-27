@@ -16,6 +16,7 @@ SPEC_TYPE="@SPEC_TYPE@"
 N_GPU_LAYERS="@N_GPU_LAYERS@"
 MODEL_ALIAS="@MODEL_ALIAS@"
 THREADS="@THREADS@"
+BEST_OF="@BEST_OF@"
 
 if [ "@IS_WHISPER@" = "yes" ]; then
   PORT=9977
@@ -28,6 +29,8 @@ usage() {
   echo ""
   if [ "@IS_WHISPER@" = "yes" ]; then
     echo "  --port NUM            Set server port (default: $PORT)"
+    echo "  --threads NUM         CPU threads (default: $THREADS)"
+    echo "  --best-of NUM         Best candidates to keep (default: $BEST_OF)"
   else
     echo "  --cli                 Launch interactive chat"
     echo "  --port NUM            Set server port (build default: $PORT)"
@@ -51,6 +54,7 @@ while [ $# -gt 0 ]; do
     --spec-type) [ "@IS_WHISPER@" != "yes" ] && SPEC_TYPE="$2"; shift 2 ;;
     --n-gpu-layers) [ "@IS_WHISPER@" != "yes" ] && N_GPU_LAYERS="$2"; shift 2 ;;
     --threads) THREADS="$2"; shift 2 ;;
+    --best-of) BEST_OF="$2"; shift 2 ;;
     *) break ;;
   esac
 done
@@ -79,7 +83,7 @@ if [ "${CLI_MODE:-0}" = "1" ] && [ "@IS_WHISPER@" != "yes" ]; then
 fi
 
 if [ "@IS_WHISPER@" = "yes" ]; then
-  ENGINE_OPTS=(-m "$MODEL" --port "$PORT")
+  ENGINE_OPTS=(-m "$MODEL" --port "$PORT" --language auto -t "$THREADS" -bo "$BEST_OF")
 else
   ENGINE_OPTS=(
     -m "$MODEL"

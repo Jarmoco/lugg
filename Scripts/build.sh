@@ -19,7 +19,7 @@ build_model() {
   echo "Packaging: $MODEL_NAME -> $OUTPUT_NAME"
 
   local MODEL_FILES=() MMPROJ_FILES=()
-  for f in "$MODEL_DIR"/*.gguf; do
+  for f in "$MODEL_DIR"/*.gguf "$MODEL_DIR"/ggml-*.bin; do
     [ -f "$f" ] || continue
     bn="$(basename "$f")"
     if echo "$bn" | grep -qi "mmproj"; then
@@ -81,6 +81,8 @@ build_model() {
   echo "--- Default parameters (can be overridden at runtime) ---"
   if [[ "$IS_WHISPER" == [yY]* ]]; then
     read -p "Port [9977]: " PORT; PORT="${PORT:-9977}"
+    read -p "CPU threads [12]: " THREADS; THREADS="${THREADS:-12}"
+    read -p "Best of [3]: " BEST_OF; BEST_OF="${BEST_OF:-3}"
   else
     read -p "Context size [0]: " CTX_SIZE; CTX_SIZE="${CTX_SIZE:-0}"
     read -p "Batch size [2048]: " BATCH_SIZE; BATCH_SIZE="${BATCH_SIZE:-2048}"
@@ -103,7 +105,8 @@ build_model() {
       -e "s/@SPEC_TYPE@/${SPEC_TYPE:-none}/g" \
       -e "s/@N_GPU_LAYERS@/${N_GPU_LAYERS:-0}/g" \
       -e "s/@MODEL_ALIAS@/${MODEL_ALIAS:-$OUTPUT_NAME}/g" \
-      -e "s/@THREADS@/${THREADS:-4}/g" \
+      -e "s/@THREADS@/${THREADS:-12}/g" \
+      -e "s/@BEST_OF@/${BEST_OF:-3}/g" \
       -e "s/@SERVER_BIN@/$SERVER_BIN/g" \
       -e "s/@CLI_BIN@/$CLI_BIN/g" \
       -e "s/@IS_WHISPER@/$([[ "$IS_WHISPER" == [yY]* ]] && echo yes || echo no)/g" \
@@ -138,9 +141,8 @@ source "$SCRIPT_DIR/huggingface.sh"
 MODELS=()
 for d in "$PROJECT_DIR/models/"*/; do
   name="$(basename "$d")"
-  gfiles=("$d"/*.gguf)
-  [ ${#gfiles[@]} -gt 0 ] && [ -f "${gfiles[0]}" ] || continue
-  MODELS+=("$name")
+  gfiles=("$d"/*.gguf "$d"/ggml-*.bin)
+  for gf in "${gfiles[@]}"; do [ -f "$gf" ] && { MODELS+=("$name"); break; }; done
 done
 
 # --- Parse args ---

@@ -69,6 +69,24 @@ install_whisper_cpp() {
     return
   fi
 
+  # Offer GPU build if NVIDIA GPU is present
+  if lspci 2>/dev/null | grep -qi nvidia ||
+     nvidia-smi 2>/dev/null >/dev/null ||
+     lsmod 2>/dev/null | grep -qi nvidia; then
+    echo ""
+    echo "NVIDIA GPU detected. Vulkan GPU support can accelerate whisper.cpp."
+    read -r -p "Build with Vulkan GPU support? [Y/n] " reply
+    case "${reply,,}" in
+      n|no) ;;
+      *)
+        echo "Building whisper.cpp with Vulkan GPU support..."
+        bash "$SCRIPT_DIR/build-whisper-vulkan.sh"
+        echo "whisper.cpp GPU build installed ($(du -sh "$ENGINE_DIR" | cut -f1))"
+        return
+        ;;
+    esac
+  fi
+
   echo "Fetching latest whisper.cpp release info..."
   local RELEASE_JSON TAG ASSET_URL
   RELEASE_JSON=$(curl -fsSL https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest)
