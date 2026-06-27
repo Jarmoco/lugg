@@ -17,6 +17,10 @@ N_GPU_LAYERS="@N_GPU_LAYERS@"
 MODEL_ALIAS="@MODEL_ALIAS@"
 THREADS="@THREADS@"
 BEST_OF="@BEST_OF@"
+STREAM_MODE="@STREAM_MODE@"
+STEP="@STEP@"
+LENGTH="@LENGTH@"
+VTH="@VTH@"
 
 if [ "@IS_WHISPER@" = "yes" ]; then
   PORT=9977
@@ -31,6 +35,10 @@ usage() {
     echo "  --port NUM            Set server port (default: $PORT)"
     echo "  --threads NUM         CPU threads (default: $THREADS)"
     echo "  --best-of NUM         Best candidates to keep (default: $BEST_OF)"
+    echo "  --stream              Real-time mic transcription (instead of server)"
+    echo "  --step NUM            Stream step in ms, 0=VAD sliding window (default: $STEP)"
+    echo "  --length NUM          Stream audio window in ms (default: $LENGTH)"
+    echo "  --vth NUM             VAD threshold for stream mode (default: $VTH)"
   else
     echo "  --cli                 Launch interactive chat"
     echo "  --port NUM            Set server port (build default: $PORT)"
@@ -55,6 +63,10 @@ while [ $# -gt 0 ]; do
     --n-gpu-layers) [ "@IS_WHISPER@" != "yes" ] && N_GPU_LAYERS="$2"; shift 2 ;;
     --threads) THREADS="$2"; shift 2 ;;
     --best-of) BEST_OF="$2"; shift 2 ;;
+    --stream) STREAM_MODE=1; shift ;;
+    --step) STEP="$2"; shift 2 ;;
+    --length) LENGTH="$2"; shift 2 ;;
+    --vth) VTH="$2"; shift 2 ;;
     *) break ;;
   esac
 done
@@ -68,7 +80,11 @@ banner() {
   printf "  ║  Model:  %-27s \n" "$NAME"
   printf "  ║  Size:   %-27s \n" "$MODEL_SIZE"
   printf "  ║  GPU:    %-27s \n" "$HAS_VULKAN"
-  printf "  ║  Port:   %-27s \n" "$PORT"
+  if [ "@IS_WHISPER@" = "yes" ] && [ "${STREAM_MODE:-@STREAM_MODE@}" = "1" ]; then
+    printf "  ║  Mode:   %-27s \n" "stream (mic -> text)"
+  else
+    printf "  ║  Port:   %-27s \n" "$PORT"
+  fi
   echo "  ╚═══════════════════════════════════════════"
   echo ""
 }
@@ -80,6 +96,15 @@ if [ "${CLI_MODE:-0}" = "1" ] && [ "@IS_WHISPER@" != "yes" ]; then
     -m "$MODEL" \
     $MMPROJ_FLAG \
     "$@"
+fi
+
+if [ "@IS_WHISPER@" = "yes" ] && [ "${STREAM_MODE:-@STREAM_MODE@}" = "1" ]; then
+  banner
+  echo "  Streaming from microphone... (Ctrl+C to stop)"
+  echo ""
+  exec "$HERE/usr/bin/whisper-stream" \
+    -m "$MODEL" --language auto -t "$THREADS" \
+    --step "$STEP" --length "$LENGTH" -vth "$VTH" "$@"
 fi
 
 if [ "@IS_WHISPER@" = "yes" ]; then

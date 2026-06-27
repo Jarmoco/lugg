@@ -58,6 +58,7 @@ install_llama_cpp() {
 
 install_whisper_cpp() {
   local ENGINE_DIR="$ENGINES_DIR/whisper.cpp"
+  local BUILT=0
 
   if [ "$(uname -m)" != "x86_64" ]; then
     echo "Skipping whisper.cpp: $(uname -m) not supported." >&2
@@ -82,35 +83,39 @@ install_whisper_cpp() {
         echo "Building whisper.cpp with Vulkan GPU support..."
         bash "$SCRIPT_DIR/build-whisper-vulkan.sh"
         echo "whisper.cpp GPU build installed ($(du -sh "$ENGINE_DIR" | cut -f1))"
-        return
+        BUILT=1
         ;;
     esac
   fi
 
-  echo "Fetching latest whisper.cpp release info..."
-  local RELEASE_JSON TAG ASSET_URL
-  RELEASE_JSON=$(curl -fsSL https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest)
-  TAG=$(echo "$RELEASE_JSON" | grep -oP '"tag_name":\s*"\K[^"]+')
-  ASSET_URL=$(echo "$RELEASE_JSON" | grep -oP '"browser_download_url":\s*"\K[^"]*ubuntu-x64\.tar\.gz')
+  if [ "$BUILT" -eq 0 ]; then
+    echo "Fetching latest whisper.cpp release info..."
+    local RELEASE_JSON TAG ASSET_URL
+    RELEASE_JSON=$(curl -fsSL https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest)
+    TAG=$(echo "$RELEASE_JSON" | grep -oP '"tag_name":\s*"\K[^"]+')
+    ASSET_URL=$(echo "$RELEASE_JSON" | grep -oP '"browser_download_url":\s*"\K[^"]*ubuntu-x64\.tar\.gz')
 
-  [ -z "$TAG" ] && echo "Error: could not parse release tag" && exit 1
-  [ -z "$ASSET_URL" ] && echo "Error: no ubuntu-x64 tarball found for $TAG" && exit 1
+    [ -z "$TAG" ] && echo "Error: could not parse release tag" && exit 1
+    [ -z "$ASSET_URL" ] && echo "Error: no ubuntu-x64 tarball found for $TAG" && exit 1
 
-  echo "Latest: $TAG"
-  echo "Asset:  $(basename "$ASSET_URL")"
+    echo "Latest: $TAG"
+    echo "Asset:  $(basename "$ASSET_URL")"
 
-  local TARBALL="/tmp/whisper-${TAG}.tar.gz"
-  if [ ! -f "$TARBALL" ] || [ "$FORCE" -eq 1 ]; then
-    echo "Downloading..."
-    curl -fSL -o "$TARBALL" "$ASSET_URL"
+    local TARBALL="/tmp/whisper-${TAG}.tar.gz"
+    if [ ! -f "$TARBALL" ] || [ "$FORCE" -eq 1 ]; then
+      echo "Downloading..."
+      curl -fSL -o "$TARBALL" "$ASSET_URL"
+    fi
+
+    echo "Extracting to Engines/whisper.cpp/..."
+    mkdir -p "$ENGINE_DIR"
+    rm -rf "$ENGINE_DIR"/* "$ENGINE_DIR"/.* 2>/dev/null || true
+    tar -xzf "$TARBALL" -C "$ENGINE_DIR" --strip-components=1
+
+    echo "whisper.cpp updated to $TAG ($(du -sh "$ENGINE_DIR" | cut -f1))"
   fi
 
-  echo "Extracting to Engines/whisper.cpp/..."
-  mkdir -p "$ENGINE_DIR"
-  rm -rf "$ENGINE_DIR"/* "$ENGINE_DIR"/.* 2>/dev/null || true
-  tar -xzf "$TARBALL" -C "$ENGINE_DIR" --strip-components=1
-
-  echo "whisper.cpp updated to $TAG ($(du -sh "$ENGINE_DIR" | cut -f1))"
+  bash "$SCRIPT_DIR/build-whisper-stream.sh"
 }
 
 install_llama_cpp

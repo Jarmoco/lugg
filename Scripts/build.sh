@@ -60,11 +60,17 @@ build_model() {
   cp "$ENGINE_DIR/$SERVER_BIN" "$WORKDIR/usr/bin/"
   if [[ "$IS_WHISPER" == [yY]* ]]; then
     cp "$ENGINE_DIR/whisper-cli" "$WORKDIR/usr/bin/" 2>/dev/null || true
+    cp "$ENGINE_DIR/whisper-stream" "$WORKDIR/usr/bin/" 2>/dev/null || true
   else
     cp "$ENGINE_DIR/llama-cli" "$WORKDIR/usr/bin/"
   fi
   for f in "$ENGINE_DIR"/*.so*; do
-    [ -f "$f" ] && cp -L "$f" "$WORKDIR/usr/bin/"
+    [ -f "$f" ] && cp -a "$f" "$WORKDIR/usr/bin/"
+  done
+  # Ensure SONAME symlinks exist (cp -a preserves them, but just in case)
+  for lib in "$WORKDIR/usr/bin"/lib*.so.*; do
+    soname=$(objdump -p "$lib" 2>/dev/null | sed -n 's/^\s*SONAME\s*//p')
+    [ -n "$soname" ] && [ ! -e "$WORKDIR/usr/bin/$soname" ] && ln -sf "$(basename "$lib")" "$WORKDIR/usr/bin/$soname"
   done
 
   cp -L "${MODEL_FILES[0]}" "$WORKDIR/usr/share/models/model.gguf"
@@ -83,6 +89,12 @@ build_model() {
     read -p "Port [9977]: " PORT; PORT="${PORT:-9977}"
     read -p "CPU threads [12]: " THREADS; THREADS="${THREADS:-12}"
     read -p "Best of [3]: " BEST_OF; BEST_OF="${BEST_OF:-3}"
+    read -p "Stream mode by default (real-time mic) [y/N]: " STREAM_MODE
+    if [[ "$STREAM_MODE" == [yY]* ]]; then
+      read -p "  Step (ms, 0=VAD sliding window) [0]: " STEP; STEP="${STEP:-0}"
+      read -p "  Length (ms) [30000]: " LENGTH; LENGTH="${LENGTH:-30000}"
+      read -p "  VAD threshold [0.6]: " VTH; VTH="${VTH:-0.6}"
+    fi
   else
     read -p "Context size [0]: " CTX_SIZE; CTX_SIZE="${CTX_SIZE:-0}"
     read -p "Batch size [2048]: " BATCH_SIZE; BATCH_SIZE="${BATCH_SIZE:-2048}"
@@ -107,6 +119,10 @@ build_model() {
       -e "s/@MODEL_ALIAS@/${MODEL_ALIAS:-$OUTPUT_NAME}/g" \
       -e "s/@THREADS@/${THREADS:-12}/g" \
       -e "s/@BEST_OF@/${BEST_OF:-3}/g" \
+      -e "s/@STREAM_MODE@/${STREAM_MODE:-0}/g" \
+      -e "s/@STEP@/${STEP:-0}/g" \
+      -e "s/@LENGTH@/${LENGTH:-30000}/g" \
+      -e "s/@VTH@/${VTH:-0.6}/g" \
       -e "s/@SERVER_BIN@/$SERVER_BIN/g" \
       -e "s/@CLI_BIN@/$CLI_BIN/g" \
       -e "s/@IS_WHISPER@/$([[ "$IS_WHISPER" == [yY]* ]] && echo yes || echo no)/g" \

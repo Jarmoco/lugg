@@ -79,12 +79,12 @@ for lib in libwhisper.so libggml-base.so libggml-cpu.so libggml.so libggml-vulka
   find "$BUILD_DIR" -name "$lib*" -type f 2>/dev/null -exec cp -v {} "$ENGINE_DIR/" \;
 done
 
-# Link .so -> .so.N for the loaders
+# Create symlinks from SONAME and short name for the loaders
 find "$ENGINE_DIR" -maxdepth 1 -name "lib*.so.*.*" -type f 2>/dev/null | while read -r f; do
   base=$(sed 's/\.so\..*/.so/' <<< "$(basename "$f")")
-  soname="${f%.*}"
-  [ ! -e "$ENGINE_DIR/$base" ]  && ln -sf "$(basename "$f")" "$ENGINE_DIR/$base"
-  [ ! -e "$soname" ]            && ln -sf "$(basename "$f")" "$soname"
+  soname=$(objdump -p "$f" 2>/dev/null | sed -n 's/^\s*SONAME\s*//p')
+  [ -n "$base" ]   && [ ! -e "$ENGINE_DIR/$base" ]   && ln -sf "$(basename "$f")" "$ENGINE_DIR/$base"
+  [ -n "$soname" ] && [ ! -e "$ENGINE_DIR/$soname" ] && ln -sf "$(basename "$f")" "$ENGINE_DIR/$soname"
 done
 
 rm -rf "$BUILD_DIR" "$SRC_DIR"
