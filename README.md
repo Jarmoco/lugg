@@ -19,6 +19,9 @@ Download a model, pack it with llama.cpp, run it anywhere. One AppImage per mode
 
 ## Quick Start
 
+Clone the repo and run the build.sh script. 
+It will automatically download the latest llama.cpp release (x86_64 Vulkan only) and help you in downloading GGUFs from huggingface, given a repo id.
+
 ```sh
 git clone https://github.com/Jarmoco/lugg.git
 cd lugg
@@ -31,7 +34,7 @@ You'll be prompted to configure performance defaults for the model. The resultin
 ./dist/ModelName-x86_64.AppImage
 ```
 
-From a file manager, double-clicking opens a terminal window with the server logs — close it to stop.
+From a file manager, double-clicking opens a terminal window with the server logs, close it to stop.
 
 ## Usage
 
@@ -68,7 +71,7 @@ All of these can be overridden at runtime.
 
 If the model folder contains a GGUF file with `mmproj` in its name (e.g. `Qwen3.5-0.8B-MTP/mmproj-Qwen3.5-0.8B-MTP-Q4_K_M.gguf`), the build script automatically detects it and bundles it into the AppImage. The runtime then passes `--mmproj` to llama-server, enabling image input support.
 
-You can download mmproj files from Hugging Face repos alongside the main GGUF model — the build script picks them up automatically.
+You can download mmproj files from Hugging Face repos alongside the main GGUF model, the build script picks them up automatically.
 
 ## Requirements
 
