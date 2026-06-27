@@ -16,12 +16,6 @@ build_model() {
   [ ! -d "$MODEL_DIR" ] && echo "Error: model folder '$MODEL_NAME' not found" && exit 1
   [ ! -f "$PROJECT_DIR/AppRun.template" ] && echo "Error: AppRun.template not found" && exit 1
 
-  local ENGINE_DIR="$PROJECT_DIR/Engine"
-  if [ ! -f "$ENGINE_DIR/llama-server" ]; then
-    echo "Engine not found. Installing..."
-    bash "$SCRIPT_DIR/install-engine.sh"
-  fi
-
   echo "Packaging: $MODEL_NAME -> $OUTPUT_NAME"
 
   local MODEL_FILES=() MMPROJ_FILES=()
@@ -36,13 +30,39 @@ build_model() {
   done
   [ ${#MODEL_FILES[@]} -eq 0 ] && echo "Error: no .gguf files in $MODEL_DIR" && exit 1
 
+  # Ask user which engine to use
+  local IS_WHISPER="n"
+  if [ -t 0 ]; then
+    read -p "Is this a whisper model? [y/N]: " IS_WHISPER
+  fi
+
+  local ENGINE_DIR SERVER_BIN CLI_BIN
+  if [[ "$IS_WHISPER" == [yY]* ]]; then
+    ENGINE_DIR="$PROJECT_DIR/Engines/whisper.cpp"
+    SERVER_BIN="whisper-server"
+    CLI_BIN="whisper-cli"
+  else
+    ENGINE_DIR="$PROJECT_DIR/Engines/llama.cpp"
+    SERVER_BIN="llama-server"
+    CLI_BIN="llama-cli"
+  fi
+
+  if [ ! -f "$ENGINE_DIR/$SERVER_BIN" ]; then
+    echo "Engine not found. Installing..."
+    bash "$SCRIPT_DIR/install-engine.sh"
+  fi
+
   WORKDIR="$(mktemp -d)"
 
   mkdir -p "$WORKDIR"/usr/{bin,lib}
   mkdir -p "$WORKDIR/usr/share/models"
 
-  cp "$ENGINE_DIR/llama-server" "$WORKDIR/usr/bin/"
-  cp "$ENGINE_DIR/llama-cli" "$WORKDIR/usr/bin/"
+  cp "$ENGINE_DIR/$SERVER_BIN" "$WORKDIR/usr/bin/"
+  if [[ "$IS_WHISPER" == [yY]* ]]; then
+    cp "$ENGINE_DIR/whisper-cli" "$WORKDIR/usr/bin/" 2>/dev/null || true
+  else
+    cp "$ENGINE_DIR/llama-cli" "$WORKDIR/usr/bin/"
+  fi
   for f in "$ENGINE_DIR"/*.so*; do
     [ -f "$f" ] && cp -L "$f" "$WORKDIR/usr/bin/"
   done
@@ -59,34 +79,41 @@ build_model() {
 
   echo ""
   echo "--- Default parameters (can be overridden at runtime) ---"
-  read -p "Context size [0]: " CTX_SIZE; CTX_SIZE="${CTX_SIZE:-0}"
-  read -p "Batch size [2048]: " BATCH_SIZE; BATCH_SIZE="${BATCH_SIZE:-2048}"
-  local SPEC_TYPES="none, draft-simple, draft-eagle3, draft-mtp, ngram-simple, ngram-map-k, ngram-map-k4v, ngram-mod, ngram-cache"
-  read -p "Speculative decoding type [$SPEC_TYPES] [none]: " SPEC_TYPE; SPEC_TYPE="${SPEC_TYPE:-none}"
-  local DEFAULT_NGL="0"
-  [ "$HAS_VULKAN" = "yes" ] && DEFAULT_NGL="99"
-  read -p "GPU layers (Vulkan: ${HAS_VULKAN}) [$DEFAULT_NGL]: " N_GPU_LAYERS; N_GPU_LAYERS="${N_GPU_LAYERS:-$DEFAULT_NGL}"
-  read -p "Model alias [$OUTPUT_NAME]: " MODEL_ALIAS; MODEL_ALIAS="${MODEL_ALIAS:-$OUTPUT_NAME}"
-  local DEFAULT_THR="4"
-  read -p "CPU threads [$DEFAULT_THR]: " THREADS; THREADS="${THREADS:-$DEFAULT_THR}"
+  if [[ "$IS_WHISPER" == [yY]* ]]; then
+    read -p "Port [9977]: " PORT; PORT="${PORT:-9977}"
+  else
+    read -p "Context size [0]: " CTX_SIZE; CTX_SIZE="${CTX_SIZE:-0}"
+    read -p "Batch size [2048]: " BATCH_SIZE; BATCH_SIZE="${BATCH_SIZE:-2048}"
+    local SPEC_TYPES="none, draft-simple, draft-eagle3, draft-mtp, ngram-simple, ngram-map-k, ngram-map-k4v, ngram-mod, ngram-cache"
+    read -p "Speculative decoding type [$SPEC_TYPES] [none]: " SPEC_TYPE; SPEC_TYPE="${SPEC_TYPE:-none}"
+    local DEFAULT_NGL="0"
+    [ "$HAS_VULKAN" = "yes" ] && DEFAULT_NGL="99"
+    read -p "GPU layers (Vulkan: ${HAS_VULKAN}) [$DEFAULT_NGL]: " N_GPU_LAYERS; N_GPU_LAYERS="${N_GPU_LAYERS:-$DEFAULT_NGL}"
+    read -p "Model alias [$OUTPUT_NAME]: " MODEL_ALIAS; MODEL_ALIAS="${MODEL_ALIAS:-$OUTPUT_NAME}"
+    local DEFAULT_THR="4"
+    read -p "CPU threads [$DEFAULT_THR]: " THREADS; THREADS="${THREADS:-$DEFAULT_THR}"
+  fi
   echo ""
 
   sed -e "s/@NAME@/$OUTPUT_NAME/g" \
       -e "s/@MODEL_SIZE@/$MODEL_SIZE/g" \
       -e "s/@HAS_VULKAN@/$HAS_VULKAN/g" \
-      -e "s/@CTX_SIZE@/$CTX_SIZE/g" \
-      -e "s/@BATCH_SIZE@/$BATCH_SIZE/g" \
-      -e "s/@SPEC_TYPE@/$SPEC_TYPE/g" \
-      -e "s/@N_GPU_LAYERS@/$N_GPU_LAYERS/g" \
-      -e "s/@MODEL_ALIAS@/$MODEL_ALIAS/g" \
-      -e "s/@THREADS@/$THREADS/g" \
+      -e "s/@CTX_SIZE@/${CTX_SIZE:-0}/g" \
+      -e "s/@BATCH_SIZE@/${BATCH_SIZE:-2048}/g" \
+      -e "s/@SPEC_TYPE@/${SPEC_TYPE:-none}/g" \
+      -e "s/@N_GPU_LAYERS@/${N_GPU_LAYERS:-0}/g" \
+      -e "s/@MODEL_ALIAS@/${MODEL_ALIAS:-$OUTPUT_NAME}/g" \
+      -e "s/@THREADS@/${THREADS:-4}/g" \
+      -e "s/@SERVER_BIN@/$SERVER_BIN/g" \
+      -e "s/@CLI_BIN@/$CLI_BIN/g" \
+      -e "s/@IS_WHISPER@/$([[ "$IS_WHISPER" == [yY]* ]] && echo yes || echo no)/g" \
       "$PROJECT_DIR/AppRun.template" > "$WORKDIR/AppRun"
   chmod +x "$WORKDIR/AppRun"
 
   cat > "$WORKDIR/$OUTPUT_NAME.desktop" << EOF
 [Desktop Entry]
 Name=$OUTPUT_NAME
-Exec=llama-server
+Exec=$SERVER_BIN
 Icon=$OUTPUT_NAME
 Type=Application
 Categories=Utility;

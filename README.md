@@ -8,11 +8,11 @@ Download a model, pack it with llama.cpp, run it anywhere. One AppImage per mode
 
 ```
 ├── AppRun.template         # AppImage entry point template
-├── Engine/                 # llama.cpp binaries (installed by install-engine.sh)
+├── Engines/                # Inference engines e.g. llama.cpp (installed by install-engine.sh)
 ├── models/                 # Model folders with .gguf files
 ├── Scripts/
 │   ├── build.sh            # Package model → AppImage
-│   ├── install-engine.sh   # Download latest llama.cpp vulkan-x64 release
+│   ├── install-engine.sh   # Download/update all engine binaries (llama.cpp, whisper.cpp, …)
 │   └── huggingface.sh      # Download GGUF files from Hugging Face
 └── dist/                   # Built .AppImage files
 ```
@@ -73,5 +73,5 @@ You can download mmproj files from Hugging Face repos alongside the main GGUF mo
 ## Requirements
 
 - **OS**: Linux (currently only x86_64)
-- **GPU**: The script automatically downloads the Vulkan backend version of llama.cpp — CPU fallback works but is slow. If your system is not x86_64 + Nvidia GPU, you have to manually download the llama.cpp version compatible with your hardware and extract into Engine/
+- **GPU**: The script automatically downloads the Vulkan backend version of llama.cpp — CPU fallback works but is slow. If your system is not x86_64 + Nvidia GPU, you have to manually download the llama.cpp version compatible with your hardware and extract into Engines/llama.cpp/
 - **Deps**: bash, curl, [jq](https://github.com/jqlang/jq/releases), [appimagetool](https://github.com/AppImage/appimagetool/releases)

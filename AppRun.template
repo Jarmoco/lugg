@@ -10,7 +10,6 @@ MMPROJ_FLAG=""
 NAME="@NAME@"
 MODEL_SIZE="@MODEL_SIZE@"
 HAS_VULKAN="@HAS_VULKAN@"
-PORT=9976
 CTX_SIZE="@CTX_SIZE@"
 BATCH_SIZE="@BATCH_SIZE@"
 SPEC_TYPE="@SPEC_TYPE@"
@@ -18,19 +17,26 @@ N_GPU_LAYERS="@N_GPU_LAYERS@"
 MODEL_ALIAS="@MODEL_ALIAS@"
 THREADS="@THREADS@"
 
+if [ "@IS_WHISPER@" = "yes" ]; then
+  PORT=9977
+else
+  PORT=9976
+fi
+
 usage() {
   echo "Usage: $(basename "$0") [OPTIONS]"
   echo ""
-  echo "  --cli                 Launch interactive chat (llama-cli)"
-  echo "  --port NUM            Set server port (build default: $PORT)"
-  echo "  --ctx-size NUM        Set context size (build default: $CTX_SIZE)"
-  echo "  --batch-size NUM      Set batch size (build default: $BATCH_SIZE)"
-  echo "  --spec-type TYPES     Speculative decoding type (build default: $SPEC_TYPE)"
-  echo "                        Values: none, draft-simple, draft-eagle3, draft-mtp,"
-  echo "                                ngram-simple, ngram-map-k, ngram-map-k4v,"
-  echo "                                ngram-mod, ngram-cache"
-  echo "  --n-gpu-layers NUM    GPU layers (build default: $N_GPU_LAYERS)"
-  echo "  --threads NUM         CPU threads (build default: $THREADS)"
+  if [ "@IS_WHISPER@" = "yes" ]; then
+    echo "  --port NUM            Set server port (default: $PORT)"
+  else
+    echo "  --cli                 Launch interactive chat"
+    echo "  --port NUM            Set server port (build default: $PORT)"
+    echo "  --ctx-size NUM        Set context size (build default: $CTX_SIZE)"
+    echo "  --batch-size NUM      Set batch size (build default: $BATCH_SIZE)"
+    echo "  --spec-type TYPES     Speculative decoding type (build default: $SPEC_TYPE)"
+    echo "  --n-gpu-layers NUM    GPU layers (build default: $N_GPU_LAYERS)"
+    echo "  --threads NUM         CPU threads (build default: $THREADS)"
+  fi
   echo "  --help                Show this help"
   exit 0
 }
@@ -38,12 +44,12 @@ usage() {
 while [ $# -gt 0 ]; do
   case "$1" in
     --help) usage ;;
-    --cli) CLI_MODE=1; shift ;;
     --port) PORT="$2"; shift 2 ;;
-    --ctx-size) CTX_SIZE="$2"; shift 2 ;;
-    --batch-size) BATCH_SIZE="$2"; shift 2 ;;
-    --spec-type) SPEC_TYPE="$2"; shift 2 ;;
-    --n-gpu-layers) N_GPU_LAYERS="$2"; shift 2 ;;
+    --cli) CLI_MODE=1; shift ;;
+    --ctx-size) [ "@IS_WHISPER@" != "yes" ] && CTX_SIZE="$2"; shift 2 ;;
+    --batch-size) [ "@IS_WHISPER@" != "yes" ] && BATCH_SIZE="$2"; shift 2 ;;
+    --spec-type) [ "@IS_WHISPER@" != "yes" ] && SPEC_TYPE="$2"; shift 2 ;;
+    --n-gpu-layers) [ "@IS_WHISPER@" != "yes" ] && N_GPU_LAYERS="$2"; shift 2 ;;
     --threads) THREADS="$2"; shift 2 ;;
     *) break ;;
   esac
@@ -53,7 +59,7 @@ banner() {
   clear 2>/dev/null || true
   echo ""
   echo "  ╔══════════════════════════════════════════╗"
-  echo "  ║          Local AI - llama-server         ║"
+  echo "  ║          Local AI - @SERVER_BIN@         ║"
   echo "  ╠══════════════════════════════════════════╝"
   printf "  ║  Model:  %-27s \n" "$NAME"
   printf "  ║  Size:   %-27s \n" "$MODEL_SIZE"
@@ -63,42 +69,42 @@ banner() {
   echo ""
 }
 
-if [ "${CLI_MODE:-0}" = "1" ]; then
+if [ "${CLI_MODE:-0}" = "1" ] && [ "@IS_WHISPER@" != "yes" ]; then
   banner
   echo "Starting interactive chat..."
-  exec "$HERE/usr/bin/llama-cli" \
+  exec "$HERE/usr/bin/@CLI_BIN@" \
     -m "$MODEL" \
     $MMPROJ_FLAG \
     "$@"
 fi
 
-LLAMA_SERVER_OPTS=(
-  -m "$MODEL"
-  $MMPROJ_FLAG
-  --port "$PORT"
-)
-
-[ -n "$CTX_SIZE" ]   && LLAMA_SERVER_OPTS+=(--ctx-size "$CTX_SIZE")
-[ -n "$BATCH_SIZE" ] && LLAMA_SERVER_OPTS+=(--batch-size "$BATCH_SIZE")
-[ "$SPEC_TYPE" != "none" ] && LLAMA_SERVER_OPTS+=(--spec-type "$SPEC_TYPE")
-
-if [ "$HAS_VULKAN" = "yes" ] && [ -n "$N_GPU_LAYERS" ]; then
-  LLAMA_SERVER_OPTS+=(--n-gpu-layers "$N_GPU_LAYERS")
+if [ "@IS_WHISPER@" = "yes" ]; then
+  ENGINE_OPTS=(-m "$MODEL" --port "$PORT")
+else
+  ENGINE_OPTS=(
+    -m "$MODEL"
+    $MMPROJ_FLAG
+    --port "$PORT"
+  )
+  [ -n "$CTX_SIZE" ]   && ENGINE_OPTS+=(--ctx-size "$CTX_SIZE")
+  [ -n "$BATCH_SIZE" ] && ENGINE_OPTS+=(--batch-size "$BATCH_SIZE")
+  [ "$SPEC_TYPE" != "none" ] && ENGINE_OPTS+=(--spec-type "$SPEC_TYPE")
+  if [ "$HAS_VULKAN" = "yes" ] && [ -n "$N_GPU_LAYERS" ]; then
+    ENGINE_OPTS+=(--n-gpu-layers "$N_GPU_LAYERS")
+  fi
+  [ -n "$MODEL_ALIAS" ] && ENGINE_OPTS+=(--alias "$MODEL_ALIAS")
+  [ -n "$THREADS" ] && ENGINE_OPTS+=(--threads "$THREADS")
 fi
-[ -n "$MODEL_ALIAS" ] && LLAMA_SERVER_OPTS+=(--alias "$MODEL_ALIAS")
-[ -n "$THREADS" ] && LLAMA_SERVER_OPTS+=(--threads "$THREADS")
 
 if [ -t 0 ]; then
   banner
   echo "  Server starting... (Ctrl+C to stop)"
   echo "  API: http://localhost:$PORT"
-  echo "  Docs: http://localhost:$PORT/docs"
+  [ "@IS_WHISPER@" != "yes" ] && echo "  Docs: http://localhost:$PORT/docs"
   echo ""
-  exec "$HERE/usr/bin/llama-server" "${LLAMA_SERVER_OPTS[@]}" "$@"
+  exec "$HERE/usr/bin/@SERVER_BIN@" "${ENGINE_OPTS[@]}" "$@"
 fi
 
-# GUI launch — run server in a terminal window.
-# Closing the terminal window sends SIGHUP and stops the server.
 for term in x-terminal-emulator kitty gnome-terminal konsole alacritty xterm terminator xfce4-terminal lxterminal; do
   if command -v "$term" &>/dev/null; then
     case "$(basename "$term")" in
@@ -106,12 +112,11 @@ for term in x-terminal-emulator kitty gnome-terminal konsole alacritty xterm ter
       *)              flag="-e"  ;;
     esac
     exec "$term" $flag bash -c 'exec "$@"' _ \
-      "$HERE/usr/bin/llama-server" "${LLAMA_SERVER_OPTS[@]}" "$@"
+      "$HERE/usr/bin/@SERVER_BIN@" "${ENGINE_OPTS[@]}" "$@"
   fi
 done
 
-# No terminal found — background with PID file
-"$HERE/usr/bin/llama-server" "${LLAMA_SERVER_OPTS[@]}" "$@" &
+"$HERE/usr/bin/@SERVER_BIN@" "${ENGINE_OPTS[@]}" "$@" &
 PID=$!
 echo "$PID" > "/tmp/lugg-$NAME.pid"
 command -v notify-send &>/dev/null && notify-send \

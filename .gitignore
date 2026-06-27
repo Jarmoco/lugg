@@ -1,5 +1,5 @@
-# Engine (llama binaries, installed by Scripts/install-engine.sh)
-Engine
+# Engines (llama.cpp, whisper.cpp, etc. — installed by Scripts/install-engine.sh)
+Engines/
 
 # Built AppImages
 dist/
