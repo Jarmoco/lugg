@@ -18,6 +18,9 @@ build_model() {
 
   echo "Packaging: $MODEL_NAME -> $OUTPUT_NAME"
 
+  local PARAKEET=0
+  [ -n "$(find "$MODEL_DIR" -maxdepth 1 -name '*.onnx' -print -quit)" ] && PARAKEET=1
+
   local MODEL_FILES=() MMPROJ_FILES=()
   for f in "$MODEL_DIR"/*.gguf "$MODEL_DIR"/ggml-*.bin; do
     [ -f "$f" ] || continue
@@ -28,11 +31,13 @@ build_model() {
       MODEL_FILES+=("$f")
     fi
   done
-  [ ${#MODEL_FILES[@]} -eq 0 ] && echo "Error: no .gguf files in $MODEL_DIR" && exit 1
+  if [ "$PARAKEET" -eq 0 ]; then
+    [ ${#MODEL_FILES[@]} -eq 0 ] && echo "Error: no .gguf or .onnx files in $MODEL_DIR" && exit 1
+  fi
 
   # Ask user which engine to use
   local IS_WHISPER="n"
-  if [ -t 0 ]; then
+  if [ -t 0 ] && [ "$PARAKEET" -eq 0 ]; then
     read -p "Is this a whisper model? [y/N]: " IS_WHISPER
   fi
 
@@ -41,6 +46,10 @@ build_model() {
     ENGINE_DIR="$PROJECT_DIR/Engines/whisper.cpp"
     SERVER_BIN="whisper-server"
     CLI_BIN="whisper-cli"
+  elif [ "$PARAKEET" -eq 1 ]; then
+    ENGINE_DIR="$PROJECT_DIR/Engines/parakeet"
+    SERVER_BIN="parakeet"
+    CLI_BIN="parakeet"
   else
     ENGINE_DIR="$PROJECT_DIR/Engines/llama.cpp"
     SERVER_BIN="llama-server"
@@ -52,40 +61,20 @@ build_model() {
     bash "$SCRIPT_DIR/install-engine.sh"
   fi
 
-  WORKDIR="$(mktemp -d)"
-
-  mkdir -p "$WORKDIR"/usr/{bin,lib}
-  mkdir -p "$WORKDIR/usr/share/models"
-
-  cp "$ENGINE_DIR/$SERVER_BIN" "$WORKDIR/usr/bin/"
-  if [[ "$IS_WHISPER" == [yY]* ]]; then
-    cp "$ENGINE_DIR/whisper-cli" "$WORKDIR/usr/bin/" 2>/dev/null || true
-    cp "$ENGINE_DIR/whisper-stream" "$WORKDIR/usr/bin/" 2>/dev/null || true
-  else
-    cp "$ENGINE_DIR/llama-cli" "$WORKDIR/usr/bin/"
-  fi
-  for f in "$ENGINE_DIR"/*.so*; do
-    [ -f "$f" ] && cp -a "$f" "$WORKDIR/usr/bin/"
-  done
-  # Ensure SONAME symlinks exist (cp -a preserves them, but just in case)
-  for lib in "$WORKDIR/usr/bin"/lib*.so.*; do
-    soname=$(objdump -p "$lib" 2>/dev/null | sed -n 's/^\s*SONAME\s*//p')
-    [ -n "$soname" ] && [ ! -e "$WORKDIR/usr/bin/$soname" ] && ln -sf "$(basename "$lib")" "$WORKDIR/usr/bin/$soname"
-  done
-
-  cp -L "${MODEL_FILES[0]}" "$WORKDIR/usr/share/models/model.gguf"
-  if [ ${#MMPROJ_FILES[@]} -gt 0 ]; then
-    cp -L "${MMPROJ_FILES[0]}" "$WORKDIR/usr/share/models/mmproj.gguf"
-  fi
-
-  local MODEL_SIZE
-  MODEL_SIZE=$(du -hL "${MODEL_FILES[0]}" | cut -f1)
   local HAS_VULKAN="no"
   [ -f "$ENGINE_DIR/libggml-vulkan.so" ] && HAS_VULKAN="yes"
 
   echo ""
   echo "--- Default parameters (can be overridden at runtime) ---"
-  if [[ "$IS_WHISPER" == [yY]* ]]; then
+  if [ "$PARAKEET" -eq 1 ]; then
+    read -p "Port [9977]: " PORT; PORT="${PORT:-9977}"
+    read -p "GPU provider (cpu/cuda) [cpu]: " GPU; GPU="${GPU:-cpu}"
+    if [ "$GPU" = "cuda" ]; then
+      read -p "Workers (each ~3GB VRAM on GPU) [1]: " WORKERS; WORKERS="${WORKERS:-1}"
+    else
+      read -p "Workers (each ~670MB RAM) [2]: " WORKERS; WORKERS="${WORKERS:-2}"
+    fi
+  elif [[ "$IS_WHISPER" == [yY]* ]]; then
     read -p "Port [9977]: " PORT; PORT="${PORT:-9977}"
     read -p "CPU threads [12]: " THREADS; THREADS="${THREADS:-12}"
     read -p "Best of [3]: " BEST_OF; BEST_OF="${BEST_OF:-3}"
@@ -109,9 +98,85 @@ build_model() {
   fi
   echo ""
 
+  WORKDIR="$(mktemp -d)"
+
+  mkdir -p "$WORKDIR"/usr/{bin,lib}
+  mkdir -p "$WORKDIR/usr/share/models"
+
+  cp "$ENGINE_DIR/$SERVER_BIN" "$WORKDIR/usr/bin/"
+  if [[ "$IS_WHISPER" == [yY]* ]]; then
+    cp "$ENGINE_DIR/whisper-cli" "$WORKDIR/usr/bin/" 2>/dev/null || true
+    cp "$ENGINE_DIR/whisper-stream" "$WORKDIR/usr/bin/" 2>/dev/null || true
+  elif [ "$PARAKEET" -eq 1 ]; then
+    :
+  else
+    cp "$ENGINE_DIR/llama-cli" "$WORKDIR/usr/bin/"
+  fi
+
+  # Copy engine shared libraries (parakeet: CPU or CUDA build as chosen above)
+  if [ "$PARAKEET" -eq 1 ]; then
+    if [ "$GPU" = "cuda" ]; then
+      if [ -f "$ENGINE_DIR/libonnxruntime-gpu.so" ]; then
+        local ORTVER
+        ORTVER=$(basename "$(readlink -f "$ENGINE_DIR/libonnxruntime-gpu.so")" | sed 's/.*\.so\.//')
+        cp -a "$ENGINE_DIR/libonnxruntime-gpu.so.${ORTVER}" "$WORKDIR/usr/bin/libonnxruntime.so.${ORTVER}"
+        ln -sf "libonnxruntime.so.${ORTVER}" "$WORKDIR/usr/bin/libonnxruntime.so.1"
+        ln -sf "libonnxruntime.so.1" "$WORKDIR/usr/bin/libonnxruntime.so"
+        for f in "$ENGINE_DIR"/cuda/*.so*; do
+          [ -f "$f" ] && cp -a "$f" "$WORKDIR/usr/lib/"
+        done
+        # ORT >= 1.17 CUDA EP split provider libs (dlopened by the main lib)
+        for f in "$ENGINE_DIR"/libonnxruntime_providers_*.so; do
+          [ -f "$f" ] && cp -a "$f" "$WORKDIR/usr/bin/"
+        done
+      else
+        echo "Warning: parakeet CUDA libraries not installed. Run install-engine.sh and choose CUDA, or rebuild with GPU provider 'cpu'."
+        GPU="cpu"
+        for f in "$ENGINE_DIR"/libonnxruntime.so*; do
+          [ -f "$f" ] && cp -a "$f" "$WORKDIR/usr/bin/"
+        done
+      fi
+    else
+      for f in "$ENGINE_DIR"/libonnxruntime.so*; do
+        [ -f "$f" ] && cp -a "$f" "$WORKDIR/usr/bin/"
+      done
+    fi
+  else
+    for f in "$ENGINE_DIR"/*.so*; do
+      [ -f "$f" ] && cp -a "$f" "$WORKDIR/usr/bin/"
+    done
+  fi
+
+  # Ensure SONAME symlinks exist (cp -a preserves them, but just in case)
+  for lib in "$WORKDIR/usr/bin"/lib*.so.*; do
+    soname=$(objdump -p "$lib" 2>/dev/null | sed -n 's/^\s*SONAME\s*//p')
+    [ -n "$soname" ] && [ ! -e "$WORKDIR/usr/bin/$soname" ] && ln -sf "$(basename "$lib")" "$WORKDIR/usr/bin/$soname"
+  done
+
+  if [ "$PARAKEET" -eq 1 ]; then
+    for f in "$MODEL_DIR"/*; do
+      [ -f "$f" ] && cp -L "$f" "$WORKDIR/usr/share/models/"
+    done
+  else
+    cp -L "${MODEL_FILES[0]}" "$WORKDIR/usr/share/models/model.gguf"
+    if [ ${#MMPROJ_FILES[@]} -gt 0 ]; then
+      cp -L "${MMPROJ_FILES[0]}" "$WORKDIR/usr/share/models/mmproj.gguf"
+    fi
+  fi
+
+  local MODEL_SIZE
+  if [ "$PARAKEET" -eq 1 ]; then
+    MODEL_SIZE=$(du -sh "$MODEL_DIR" | cut -f1)
+  else
+    MODEL_SIZE=$(du -hL "${MODEL_FILES[0]}" | cut -f1)
+  fi
+  local HAS_GPU="$HAS_VULKAN"
+  [ "$PARAKEET" -eq 1 ] && [ "$GPU" = "cuda" ] && HAS_GPU="cuda"
+
   sed -e "s/@NAME@/$OUTPUT_NAME/g" \
       -e "s/@MODEL_SIZE@/$MODEL_SIZE/g" \
       -e "s/@HAS_VULKAN@/$HAS_VULKAN/g" \
+      -e "s/@HAS_GPU@/$HAS_GPU/g" \
       -e "s/@CTX_SIZE@/${CTX_SIZE:-0}/g" \
       -e "s/@BATCH_SIZE@/${BATCH_SIZE:-2048}/g" \
       -e "s/@SPEC_TYPE@/${SPEC_TYPE:-none}/g" \
@@ -126,6 +191,9 @@ build_model() {
       -e "s/@SERVER_BIN@/$SERVER_BIN/g" \
       -e "s/@CLI_BIN@/$CLI_BIN/g" \
       -e "s/@IS_WHISPER@/$([[ "$IS_WHISPER" == [yY]* ]] && echo yes || echo no)/g" \
+      -e "s/@IS_PARAKEET@/$([ "$PARAKEET" -eq 1 ] && echo yes || echo no)/g" \
+      -e "s/@WORKERS@/${WORKERS:-2}/g" \
+      -e "s/@GPU@/${GPU:-cpu}/g" \
       "$PROJECT_DIR/AppRun.template" > "$WORKDIR/AppRun"
   chmod +x "$WORKDIR/AppRun"
 
@@ -152,12 +220,13 @@ EOF
 }
 
 source "$SCRIPT_DIR/huggingface.sh"
+source "$SCRIPT_DIR/download-parakeet-models.sh"
 
 # --- Collect models ---
 MODELS=()
 for d in "$PROJECT_DIR/models/"*/; do
   name="$(basename "$d")"
-  gfiles=("$d"/*.gguf "$d"/ggml-*.bin)
+  gfiles=("$d"/*.gguf "$d"/ggml-*.bin "$d"/*.onnx)
   for gf in "${gfiles[@]}"; do [ -f "$gf" ] && { MODELS+=("$name"); break; }; done
 done
 
@@ -191,10 +260,11 @@ if [ ${#MODELS[@]} -eq 0 ]; then
 fi
 
 echo "Select a model to package:"
-select m in "Download from Hugging Face" "${MODELS[@]}" "Cancel"; do
+select m in "Download from Hugging Face" "Download Parakeet models" "${MODELS[@]}" "Cancel"; do
   case "$m" in
     "Cancel") echo "Aborted."; exit 0 ;;
     "Download from Hugging Face") download_gguf; break ;;
+    "Download Parakeet models") download_parakeet_models; break ;;
     "") echo "Invalid selection" ;;
     *) build_model "$m" "$m"; break ;;
   esac

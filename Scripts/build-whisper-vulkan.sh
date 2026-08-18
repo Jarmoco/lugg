@@ -28,7 +28,7 @@ install_deps() {
       sudo apt-get update -qq
       sudo apt-get install -y -qq \
         build-essential cmake git \
-        shaderc libvulkan-dev
+        glslc libshaderc-dev libvulkan-dev
       if ! dpkg -l spirv-headers 2>/dev/null >/dev/null; then
         log "SPIRV-Headers cmake config not found, installing from source..."
         tmpdir=$(mktemp -d)

@@ -13,7 +13,8 @@ Download a model, pack it with llama.cpp, run it anywhere. One AppImage per mode
 ├── Scripts/
 │   ├── build.sh            # Package model → AppImage
 │   ├── install-engine.sh   # Download/update all engine binaries (llama.cpp, whisper.cpp, …)
-│   └── huggingface.sh      # Download GGUF files from Hugging Face
+│   ├── huggingface.sh      # Download GGUF files from Hugging Face
+│   └── download-parakeet-models.sh  # Download Parakeet ONNX models
 └── dist/                   # Built .AppImage files
 ```
 
@@ -72,6 +73,16 @@ All of these can be overridden at runtime.
 If the model folder contains a GGUF file with `mmproj` in its name (e.g. `Qwen3.5-0.8B-MTP/mmproj-Qwen3.5-0.8B-MTP-Q4_K_M.gguf`), the build script automatically detects it and bundles it into the AppImage. The runtime then passes `--mmproj` to llama-server, enabling image input support.
 
 You can download mmproj files from Hugging Face repos alongside the main GGUF model, the build script picks them up automatically.
+
+### Parakeet (speech recognition)
+
+Model folders containing `.onnx` files are detected as Parakeet models and packaged with the [achetronic/parakeet](https://github.com/achetronic/parakeet) server (OpenAI Whisper-compatible API).
+
+- **Download models**: pick "Download Parakeet models" from `./Scripts/build.sh`, or run `./Scripts/download-parakeet-models.sh`. Int8 (~670MB) is the default; **fp32 (~2.5GB)** is the choice for full accuracy on GPU.
+- **Engine**: `install-engine.sh` installs the parakeet server binary + `libonnxruntime.so` into `Engines/parakeet/` automatically. If an NVIDIA GPU is detected it offers a **CUDA build**, which bundles the CUDA 12.x + cuDNN 9 runtime libraries (from NVIDIA's redistributable pip wheels) — only the kernel driver stays on the host (driver ≥ 570.26 required).
+- **GPU AppImage**: answer `cuda` to the "GPU provider" prompt when building, then run with `--gpu cuda`. CUDA libs and the GPU ONNX Runtime are bundled; workers default to 1 (~3GB VRAM each with fp32). CPU AppImages only bundle the CPU runtime.
+- **API**: `POST /v1/audio/transcriptions` (WAV always; MP3/OGG/etc. via host `ffmpeg`), `GET /v1/models`, `GET /health`.
+- **Runtime flags**: `--port`, `--workers`, `--gpu` (cpu/cuda).
 
 ## Requirements
 

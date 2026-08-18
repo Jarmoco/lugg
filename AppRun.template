@@ -10,6 +10,7 @@ MMPROJ_FLAG=""
 NAME="@NAME@"
 MODEL_SIZE="@MODEL_SIZE@"
 HAS_VULKAN="@HAS_VULKAN@"
+HAS_GPU="@HAS_GPU@"
 CTX_SIZE="@CTX_SIZE@"
 BATCH_SIZE="@BATCH_SIZE@"
 SPEC_TYPE="@SPEC_TYPE@"
@@ -21,8 +22,10 @@ STREAM_MODE="@STREAM_MODE@"
 STEP="@STEP@"
 LENGTH="@LENGTH@"
 VTH="@VTH@"
+WORKERS="@WORKERS@"
+GPU="@GPU@"
 
-if [ "@IS_WHISPER@" = "yes" ]; then
+if [ "@IS_WHISPER@" = "yes" ] || [ "@IS_PARAKEET@" = "yes" ]; then
   PORT=9977
 else
   PORT=9976
@@ -31,7 +34,11 @@ fi
 usage() {
   echo "Usage: $(basename "$0") [OPTIONS]"
   echo ""
-  if [ "@IS_WHISPER@" = "yes" ]; then
+  if [ "@IS_PARAKEET@" = "yes" ]; then
+    echo "  --port NUM            Set server port (default: $PORT)"
+    echo "  --workers NUM         Concurrent inference workers (default: $WORKERS)"
+    echo "  --gpu PROVIDER        Execution provider: cpu or cuda (default: $GPU)"
+  elif [ "@IS_WHISPER@" = "yes" ]; then
     echo "  --port NUM            Set server port (default: $PORT)"
     echo "  --threads NUM         CPU threads (default: $THREADS)"
     echo "  --best-of NUM         Best candidates to keep (default: $BEST_OF)"
@@ -56,17 +63,19 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --help) usage ;;
     --port) PORT="$2"; shift 2 ;;
-    --cli) CLI_MODE=1; shift ;;
-    --ctx-size) [ "@IS_WHISPER@" != "yes" ] && CTX_SIZE="$2"; shift 2 ;;
-    --batch-size) [ "@IS_WHISPER@" != "yes" ] && BATCH_SIZE="$2"; shift 2 ;;
-    --spec-type) [ "@IS_WHISPER@" != "yes" ] && SPEC_TYPE="$2"; shift 2 ;;
-    --n-gpu-layers) [ "@IS_WHISPER@" != "yes" ] && N_GPU_LAYERS="$2"; shift 2 ;;
-    --threads) THREADS="$2"; shift 2 ;;
-    --best-of) BEST_OF="$2"; shift 2 ;;
-    --stream) STREAM_MODE=1; shift ;;
-    --step) STEP="$2"; shift 2 ;;
-    --length) LENGTH="$2"; shift 2 ;;
-    --vth) VTH="$2"; shift 2 ;;
+    --workers) [ "@IS_PARAKEET@" = "yes" ] && WORKERS="$2"; shift 2 ;;
+    --gpu) [ "@IS_PARAKEET@" = "yes" ] && GPU="$2"; shift 2 ;;
+    --cli) [ "@IS_WHISPER@" != "yes" ] && [ "@IS_PARAKEET@" != "yes" ] && CLI_MODE=1; shift ;;
+    --ctx-size) [ "@IS_WHISPER@" != "yes" ] && [ "@IS_PARAKEET@" != "yes" ] && CTX_SIZE="$2"; shift 2 ;;
+    --batch-size) [ "@IS_WHISPER@" != "yes" ] && [ "@IS_PARAKEET@" != "yes" ] && BATCH_SIZE="$2"; shift 2 ;;
+    --spec-type) [ "@IS_WHISPER@" != "yes" ] && [ "@IS_PARAKEET@" != "yes" ] && SPEC_TYPE="$2"; shift 2 ;;
+    --n-gpu-layers) [ "@IS_WHISPER@" != "yes" ] && [ "@IS_PARAKEET@" != "yes" ] && N_GPU_LAYERS="$2"; shift 2 ;;
+    --threads) [ "@IS_PARAKEET@" != "yes" ] && THREADS="$2"; shift 2 ;;
+    --best-of) [ "@IS_WHISPER@" = "yes" ] && BEST_OF="$2"; shift 2 ;;
+    --stream) [ "@IS_WHISPER@" = "yes" ] && STREAM_MODE=1; shift ;;
+    --step) [ "@IS_WHISPER@" = "yes" ] && STEP="$2"; shift 2 ;;
+    --length) [ "@IS_WHISPER@" = "yes" ] && LENGTH="$2"; shift 2 ;;
+    --vth) [ "@IS_WHISPER@" = "yes" ] && VTH="$2"; shift 2 ;;
     *) break ;;
   esac
 done
@@ -79,7 +88,7 @@ banner() {
   echo "  ╠══════════════════════════════════════════╝"
   printf "  ║  Model:  %-27s \n" "$NAME"
   printf "  ║  Size:   %-27s \n" "$MODEL_SIZE"
-  printf "  ║  GPU:    %-27s \n" "$HAS_VULKAN"
+  printf "  ║  GPU:    %-27s \n" "$HAS_GPU"
   if [ "@IS_WHISPER@" = "yes" ] && [ "${STREAM_MODE:-@STREAM_MODE@}" = "1" ]; then
     printf "  ║  Mode:   %-27s \n" "stream (mic -> text)"
   else
@@ -89,11 +98,12 @@ banner() {
   echo ""
 }
 
-if [ "${CLI_MODE:-0}" = "1" ] && [ "@IS_WHISPER@" != "yes" ]; then
+if [ "${CLI_MODE:-0}" = "1" ] && [ "@IS_WHISPER@" != "yes" ] && [ "@IS_PARAKEET@" != "yes" ]; then
   banner
   echo "Starting interactive chat..."
   exec "$HERE/usr/bin/@CLI_BIN@" \
     -m "$MODEL" \
+    --host 0.0.0.0 \
     $MMPROJ_FLAG \
     "$@"
 fi
@@ -107,8 +117,12 @@ if [ "@IS_WHISPER@" = "yes" ] && [ "${STREAM_MODE:-@STREAM_MODE@}" = "1" ]; then
     --step "$STEP" --length "$LENGTH" -vth "$VTH" "$@"
 fi
 
-if [ "@IS_WHISPER@" = "yes" ]; then
-  ENGINE_OPTS=(-m "$MODEL" --port "$PORT" --language auto -t "$THREADS" -bo "$BEST_OF")
+if [ "@IS_PARAKEET@" = "yes" ]; then
+  export ONNXRUNTIME_LIB="$HERE/usr/bin/libonnxruntime.so"
+  ENGINE_OPTS=(-port "$PORT" -models "$HERE/usr/share/models" -workers "$WORKERS")
+  [ "$GPU" != "cpu" ] && ENGINE_OPTS+=(-gpu "$GPU")
+elif [ "@IS_WHISPER@" = "yes" ]; then
+  ENGINE_OPTS=(-m "$MODEL" --port "$PORT" --host 0.0.0.0 --language auto -t "$THREADS" -bo "$BEST_OF")
 else
   ENGINE_OPTS=(
     -m "$MODEL"
@@ -129,7 +143,7 @@ if [ -t 0 ]; then
   banner
   echo "  Server starting... (Ctrl+C to stop)"
   echo "  API: http://localhost:$PORT"
-  [ "@IS_WHISPER@" != "yes" ] && echo "  Docs: http://localhost:$PORT/docs"
+  [ "@IS_WHISPER@" != "yes" ] && [ "@IS_PARAKEET@" != "yes" ] && echo "  Docs: http://localhost:$PORT/docs"
   echo ""
   exec "$HERE/usr/bin/@SERVER_BIN@" "${ENGINE_OPTS[@]}" "$@"
 fi
