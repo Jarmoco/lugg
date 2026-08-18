@@ -54,6 +54,18 @@ During `./Scripts/build.sh` you can set default parameters:
 
 All of these can be overridden at runtime.
 
+### Engines
+
+`./Scripts/install-engine.sh` installs the inference engines (llama.cpp, whisper.cpp, parakeet). By default it installs all of them; pass one or more engine names to install only those:
+
+```sh
+./Scripts/install-engine.sh parakeet        # only the parakeet engine
+./Scripts/install-engine.sh llama whisper   # llama.cpp + whisper.cpp
+./Scripts/install-engine.sh --force parakeet  # reinstall even if present
+```
+
+`build.sh` also auto-installs the engine for the model you're packaging (and only that one) when it's missing.
+
 ### AppImage Runtime
 
 | Flag | Behavior |

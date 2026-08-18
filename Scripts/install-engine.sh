@@ -5,8 +5,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 ENGINES_DIR="$PROJECT_DIR/Engines"
 
+# Usage: install-engine.sh [--force] [llama|whisper|parakeet ...]
+#   --force            reinstall even if already present
+#   engine names       install only those engines
+#   (no engine names)  install all engines (default)
 FORCE=0
-[ "${1:-}" = "--force" ] && FORCE=1
+WANTED=()
+for arg in "$@"; do
+  case "$arg" in
+    --force) FORCE=1 ;;
+    llama|whisper|parakeet) WANTED+=("$arg") ;;
+    *) echo "Unknown argument: $arg" >&2; exit 1 ;;
+  esac
+done
 
 install_llama_cpp() {
   local ENGINE_DIR="$ENGINES_DIR/llama.cpp"
@@ -136,38 +147,42 @@ fetch_nvidia_wheel() { # $1=pkg $2=destdir
 # the host.
 install_parakeet_cuda_libs() { # $1=engine_dir
   local ENGINE_DIR="$1"
-  local CUDA_DIR="$ENGINE_DIR/cuda" WHEELS EXTRACT pkg ZLIB
+  local CUDA_DIR="$ENGINE_DIR/cuda" pkg WORK EXTRACT wheel
   mkdir -p "$CUDA_DIR"
-  WHEELS="$(mktemp -d)"
-  EXTRACT="$WHEELS/x"
 
   local PKGS=(nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 nvidia-cufft-cu12 \
               nvidia-curand-cu12 nvidia-cusolver-cu12 nvidia-cusparse-cu12 \
               nvidia-cuda-nvrtc-cu12 nvidia-nccl-cu12 nvidia-cudnn-cu12)
 
+  # Process one wheel at a time so /tmp never holds all wheels + extracts
+  # at once (the full set is ~3.6 GB and /tmp is often a small tmpfs).
   for pkg in "${PKGS[@]}"; do
+    WORK="$(mktemp -d)"
+    EXTRACT="$WORK/x"
     echo "  downloading $pkg..."
-    fetch_nvidia_wheel "$pkg" "$WHEELS" || { rm -rf "$WHEELS"; return 1; }
-  done
-
-  echo "  extracting CUDA/cuDNN libraries..."
-  for wheel in "$WHEELS"/*.whl; do
+    if ! fetch_nvidia_wheel "$pkg" "$WORK"; then
+      rm -rf "$WORK"
+      return 1
+    fi
+    wheel="$(find "$WORK" -name '*.whl' -print -quit)"
+    echo "  extracting $pkg..."
     if command -v unzip >/dev/null; then
       unzip -oq "$wheel" '*/lib/*.so*' -d "$EXTRACT"
     else
       python3 -m zipfile -e "$wheel" "$EXTRACT"
     fi
+    find "$EXTRACT" -name '*.so*' -type f -exec cp -a {} "$CUDA_DIR/" \;
+    rm -rf "$WORK"
   done
-  find "$EXTRACT" -name '*.so*' -type f -exec cp -a {} "$CUDA_DIR/" \;
 
   # cuDNN 9 needs zlib on Linux; bundle the host's if available
+  local ZLIB
   ZLIB=$(find /usr/lib /lib /usr/local/lib -maxdepth 4 -name 'libz.so.1.*' -type f 2>/dev/null | head -1)
   if [ -n "$ZLIB" ]; then
     cp -a "$ZLIB" "$CUDA_DIR/"
     ln -sf "$(basename "$ZLIB")" "$CUDA_DIR/libz.so.1"
   fi
 
-  rm -rf "$WHEELS"
   echo "  CUDA/cuDNN runtime libs installed to $CUDA_DIR ($(du -sh "$CUDA_DIR" | cut -f1))"
 }
 
@@ -253,8 +268,24 @@ install_parakeet() {
   echo "parakeet updated to $TAG with ONNX Runtime v${ONNX_VERSION} ($(du -sh "$ENGINE_DIR" | cut -f1))"
 }
 
-install_llama_cpp
-install_whisper_cpp
-install_parakeet
+# Install only requested engines, or all of them by default
+run_engine() {
+  local eng="$1"
+  case "$eng" in
+    llama)    install_llama_cpp ;;
+    whisper)  install_whisper_cpp ;;
+    parakeet) install_parakeet ;;
+  esac
+}
 
-echo "All engines installed."
+if [ ${#WANTED[@]} -eq 0 ]; then
+  run_engine llama
+  run_engine whisper
+  run_engine parakeet
+else
+  for eng in "${WANTED[@]}"; do
+    run_engine "$eng"
+  done
+fi
+
+echo "All requested engines installed."

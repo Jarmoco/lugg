@@ -69,7 +69,10 @@ build_model() {
 
   if [ ! -f "$ENGINE_DIR/$SERVER_BIN" ]; then
     echo "Engine not found. Installing..."
-    bash "$SCRIPT_DIR/install-engine.sh"
+    local ENGINE_NAME="llama"
+    [[ "$IS_WHISPER" == [yY]* ]] && ENGINE_NAME="whisper"
+    [ "$PARAKEET" -eq 1 ] && ENGINE_NAME="parakeet"
+    bash "$SCRIPT_DIR/install-engine.sh" "$ENGINE_NAME"
   fi
 
   local HAS_VULKAN="no"
@@ -127,7 +130,11 @@ build_model() {
   # Copy engine shared libraries (parakeet: CPU or CUDA build as chosen above)
   if [ "$PARAKEET" -eq 1 ]; then
     if [ "$GPU" = "cuda" ]; then
-      if [ -f "$ENGINE_DIR/libonnxruntime-gpu.so" ]; then
+      local CUDA_LIBS_OK=0
+      [ -f "$ENGINE_DIR/libonnxruntime-gpu.so" ] && \
+        [ -n "$(find "$ENGINE_DIR/cuda" -maxdepth 1 -name '*.so*' -print -quit 2>/dev/null)" ] && \
+        CUDA_LIBS_OK=1
+      if [ "$CUDA_LIBS_OK" -eq 1 ]; then
         local ORTVER
         ORTVER=$(basename "$(readlink -f "$ENGINE_DIR/libonnxruntime-gpu.so")" | sed 's/.*\.so\.//')
         cp -a "$ENGINE_DIR/libonnxruntime-gpu.so.${ORTVER}" "$WORKDIR/usr/bin/libonnxruntime.so.${ORTVER}"
@@ -141,11 +148,10 @@ build_model() {
           [ -f "$f" ] && cp -a "$f" "$WORKDIR/usr/bin/"
         done
       else
-        echo "Warning: parakeet CUDA libraries not installed. Run install-engine.sh and choose CUDA, or rebuild with GPU provider 'cpu'."
-        GPU="cpu"
-        for f in "$ENGINE_DIR"/libonnxruntime.so*; do
-          [ -f "$f" ] && cp -a "$f" "$WORKDIR/usr/bin/"
-        done
+        echo "Error: CUDA support requested but CUDA runtime libraries are not installed."
+        echo "Run: Scripts/install-engine.sh --force parakeet  and answer 'y' to CUDA GPU support."
+        echo "Then rebuild with GPU provider 'cuda'."
+        exit 1
       fi
     else
       for f in "$ENGINE_DIR"/libonnxruntime.so*; do

@@ -22,7 +22,7 @@ install_deps() {
     pacman)
       sudo pacman -S --noconfirm \
         base-devel cmake git \
-        shaderc spirv-headers vulkan-headers vulkan-loader
+        shaderc spirv-headers vulkan-headers vulkan-icd-loader
       ;;
     apt)
       sudo apt-get update -qq
