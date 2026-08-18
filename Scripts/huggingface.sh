@@ -4,6 +4,7 @@
 [ -z "$PROJECT_DIR" ] && PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 download_gguf() {
+  local ENGINE="${1:-llama}" # "llama" (GGUF) or "whisper"
   local REPO_ID
   read -p "Hugging Face repo ID (e.g., bartowski/Llama-3.2-1B-Instruct-GGUF): " REPO_ID
   [ -z "$REPO_ID" ] && echo "Aborted." && return 1
@@ -58,6 +59,7 @@ download_gguf() {
   echo "Downloading $CHOSEN_NAME..."
   (cd "$MODEL_DIR" && curl -L -O "https://huggingface.co/$REPO_ID/resolve/main/$CHOSEN_NAME")
 
+  echo "$ENGINE" > "$MODEL_DIR/.engine"
   echo "Downloaded to $MODEL_DIR/$CHOSEN_NAME"
 
   read -p "Build AppImage now? (Y/n): " BUILD_NOW

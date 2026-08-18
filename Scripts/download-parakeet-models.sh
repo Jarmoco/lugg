@@ -21,6 +21,7 @@ download_parakeet_models() {
 
   local MODEL_DIR="$PROJECT_DIR/models/$FOLDER_NAME"
   mkdir -p "$MODEL_DIR"
+  echo "parakeet" > "$MODEL_DIR/.engine"
 
   local FILES=("config.json" "vocab.txt" "nemo128.onnx")
   if [ "$PRECISION" = "fp32" ]; then

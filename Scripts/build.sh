@@ -37,8 +37,19 @@ build_model() {
 
   # Ask user which engine to use
   local IS_WHISPER="n"
-  if [ -t 0 ] && [ "$PARAKEET" -eq 0 ]; then
-    read -p "Is this a whisper model? [y/N]: " IS_WHISPER
+  local ENGINE_HINT=""
+  [ -f "$MODEL_DIR/.engine" ] && ENGINE_HINT="$(cat "$MODEL_DIR/.engine")"
+  if [ "$PARAKEET" -eq 0 ]; then
+    case "$ENGINE_HINT" in
+      whisper) IS_WHISPER="y" ;;
+      llama|gguf) IS_WHISPER="n" ;;
+      *)
+        # No hint: ask only when interactive; otherwise default to llama
+        if [ -t 0 ]; then
+          read -p "Is this a whisper model? [y/N]: " IS_WHISPER
+        fi
+        ;;
+    esac
   fi
 
   local ENGINE_DIR SERVER_BIN CLI_BIN
@@ -222,6 +233,20 @@ EOF
 source "$SCRIPT_DIR/huggingface.sh"
 source "$SCRIPT_DIR/download-parakeet-models.sh"
 
+# --- Download menu: pick model type first (decides files + engine) ---
+download_menu() {
+  echo "Select model type to download:"
+  select t in "GGUF (llama.cpp)" "Whisper (whisper.cpp)" "Parakeet (ONNX)" "Cancel"; do
+    case "$t" in
+      "Cancel") echo "Aborted."; return 1 ;;
+      "GGUF (llama.cpp)") download_gguf llama; return 0 ;;
+      "Whisper (whisper.cpp)") download_gguf whisper; return 0 ;;
+      "Parakeet (ONNX)") download_parakeet_models; return 0 ;;
+      "") echo "Invalid selection" ;;
+    esac
+  done
+}
+
 # --- Collect models ---
 MODELS=()
 for d in "$PROJECT_DIR/models/"*/; do
@@ -236,7 +261,7 @@ if [ $# -ge 1 ]; then
     -h|--help)
       echo "Usage: $0 [model-folder] [-n name]"; echo "       $0 (interactive)"; echo "       $0 (-d|--download)"; exit 0 ;;
     -i|--interactive) ;;
-    -d|--download) download_gguf; exit 0 ;;
+    -d|--download) download_menu; exit 0 ;;
     *)
       MODEL_NAME="$1"
       OUTPUT_NAME="$MODEL_NAME"
@@ -255,16 +280,17 @@ fi
 # --- Interactive ---
 if [ ${#MODELS[@]} -eq 0 ]; then
   echo "No model folders found."
-  download_gguf
+  download_menu
   exit 0
 fi
 
 echo "Select a model to package:"
-select m in "Download from Hugging Face" "Download Parakeet models" "${MODELS[@]}" "Cancel"; do
+select m in "Download GGUF model" "Download Whisper model" "Download Parakeet model" "${MODELS[@]}" "Cancel"; do
   case "$m" in
     "Cancel") echo "Aborted."; exit 0 ;;
-    "Download from Hugging Face") download_gguf; break ;;
-    "Download Parakeet models") download_parakeet_models; break ;;
+    "Download GGUF model") download_gguf llama; break ;;
+    "Download Whisper model") download_gguf whisper; break ;;
+    "Download Parakeet model") download_parakeet_models; break ;;
     "") echo "Invalid selection" ;;
     *) build_model "$m" "$m"; break ;;
   esac
