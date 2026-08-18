@@ -24,6 +24,7 @@ LENGTH="@LENGTH@"
 VTH="@VTH@"
 WORKERS="@WORKERS@"
 GPU="@GPU@"
+PRECISION="@PRECISION@"
 
 if [ "@IS_WHISPER@" = "yes" ] || [ "@IS_PARAKEET@" = "yes" ]; then
   PORT=9977
@@ -89,6 +90,9 @@ banner() {
   printf "  ║  Model:  %-27s \n" "$NAME"
   printf "  ║  Size:   %-27s \n" "$MODEL_SIZE"
   printf "  ║  GPU:    %-27s \n" "$HAS_GPU"
+  if [ "@IS_PARAKEET@" = "yes" ]; then
+    printf "  ║  Prec:   %-27s \n" "$PRECISION"
+  fi
   if [ "@IS_WHISPER@" = "yes" ] && [ "${STREAM_MODE:-@STREAM_MODE@}" = "1" ]; then
     printf "  ║  Mode:   %-27s \n" "stream (mic -> text)"
   else

@@ -78,6 +78,8 @@ build_model() {
   local HAS_VULKAN="no"
   [ -f "$ENGINE_DIR/libggml-vulkan.so" ] && HAS_VULKAN="yes"
 
+  local PRECISION="int8"   # parakeet: rewritten below; irrelevant for other engines
+
   echo ""
   echo "--- Default parameters (can be overridden at runtime) ---"
   if [ "$PARAKEET" -eq 1 ]; then
@@ -87,6 +89,37 @@ build_model() {
       read -p "Workers (each ~3GB VRAM on GPU) [1]: " WORKERS; WORKERS="${WORKERS:-1}"
     else
       read -p "Workers (each ~670MB RAM) [2]: " WORKERS; WORKERS="${WORKERS:-2}"
+    fi
+    # Precision selector: int8 = compact/fast, fp32 = full accuracy (esp. on GPU).
+    # Default is auto-detected from whatever model files are already in the folder.
+    local HAVE_INT8=0 HAVE_FP32=0
+    [ -f "$MODEL_DIR/encoder-model.int8.onnx" ] && HAVE_INT8=1
+    [ -f "$MODEL_DIR/encoder-model.onnx" ] && [ -f "$MODEL_DIR/encoder-model.onnx.data" ] && HAVE_FP32=1
+    local PREC_DEFAULT="int8"
+    [ "$HAVE_FP32" -eq 1 ] && [ "$HAVE_INT8" -eq 0 ] && PREC_DEFAULT="fp32"
+    read -p "Model precision (int8/fp32) [$PREC_DEFAULT]: " PRECISION
+    PRECISION="${PRECISION:-$PREC_DEFAULT}"
+    case "${PRECISION,,}" in
+      int8) PRECISION="int8" ;;
+      fp32) PRECISION="fp32" ;;
+      *) echo "Error: precision must be 'int8' or 'fp32' (got: $PRECISION)." >&2; exit 1 ;;
+    esac
+    if [ "$PRECISION" = "int8" ] && [ "$HAVE_INT8" -eq 0 ]; then
+      echo "Error: no int8 model files in $MODEL_DIR" >&2
+      echo "Run: Scripts/download-parakeet-models.sh  and answer 'int8'" >&2
+      exit 1
+    fi
+    if [ "$PRECISION" = "fp32" ] && [ "$HAVE_FP32" -eq 0 ]; then
+      echo "Error: no fp32 model files (encoder-model.onnx/.data, decoder_joint-model.onnx) in $MODEL_DIR" >&2
+      echo "Run: Scripts/download-parakeet-models.sh  and answer 'fp32'" >&2
+      exit 1
+    fi
+    if [ "$PRECISION" = "fp32" ]; then
+      if [ "$GPU" = "cuda" ]; then
+        echo "Note: fp32 needs ~3GB VRAM per worker on GPU; keep --workers low."
+      else
+        echo "Note: fp32 needs ~6GB RAM per worker on CPU."
+      fi
     fi
   elif [[ "$IS_WHISPER" == [yY]* ]]; then
     read -p "Port [9977]: " PORT; PORT="${PORT:-9977}"
@@ -211,6 +244,7 @@ build_model() {
       -e "s/@IS_PARAKEET@/$([ "$PARAKEET" -eq 1 ] && echo yes || echo no)/g" \
       -e "s/@WORKERS@/${WORKERS:-2}/g" \
       -e "s/@GPU@/${GPU:-cpu}/g" \
+      -e "s/@PRECISION@/$PRECISION/g" \
       "$PROJECT_DIR/AppRun.template" > "$WORKDIR/AppRun"
   chmod +x "$WORKDIR/AppRun"
 
